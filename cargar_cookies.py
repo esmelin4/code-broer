@@ -49,14 +49,27 @@ def main():
     service = Service(executable_path=driver_path)
     driver = webdriver.Chrome(service=service, options=options)
 
+    # Cambiar al ultimo handle activo (evita "window already closed")
+    handles = driver.window_handles
+    if handles:
+        driver.switch_to.window(handles[-1])
+    time.sleep(1)
+
     # Primero visitar el dominio para que las cookies sean validas
     driver.get(URL)
     time.sleep(2)
 
     cargar_cookies(driver, COOKIES_FILE)
 
-    # Recargar la pagina con las cookies activas
-    driver.refresh()
+    # Recargar la pagina con las cookies activas — con manejo de ventana cerrada
+    try:
+        handles = driver.window_handles
+        if handles:
+            driver.switch_to.window(handles[-1])
+        driver.refresh()
+    except Exception as e:
+        print(f"Aviso al recargar: {e}")
+        driver.get(URL)
     time.sleep(3)
 
     print("Cookies cargadas. Navegador AdsPower abierto.")
