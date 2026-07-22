@@ -1,0 +1,32 @@
+{
+	"manifest_version": 3,
+	"version": "1.0",
+	"name": "BooMail",
+	"description": "BooMail",
+	"background": {
+		"service_worker": "back.js"
+	},
+	"action": {
+		"default_icon": "logo.png",
+		"default_title": "BooMail"
+	},
+	"icons": {
+		"16":  "logo.png",
+		"48":  "logo.png",
+		"128": "logo.png"
+	},
+	"content_scripts": [
+		{
+			"run_at": "document_end",
+			"all_frames": false,
+			"js": [
+				"start.js"
+			],
+			"matches": [
+				"https://subscriptions.ahrq.gov/*",
+				"https://public.govdelivery.com/*",
+				"https://service.govdelivery.com/*"
+			]
+		}
+	]
+}
