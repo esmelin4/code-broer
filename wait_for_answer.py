@@ -2,8 +2,6 @@ import threading
 import time
 import numpy as np
 import sounddevice as sd
-import pyautogui
-import cv2
 import os
 
 TEMPLATE_PATH = "call_timer.png"  # guarda la imagen del cronometro con este nombre
@@ -34,17 +32,36 @@ def wait_for_answer(max_wait=30):
         if not os.path.exists(TEMPLATE_PATH):
             log(f"[CALL] ⚠ No se encontró {TEMPLATE_PATH}, detección visual desactivada.")
             return
-        log("[CALL] Detección visual activa...")
-        while not answered.is_set():
-            try:
-                found = pyautogui.locateOnScreen(TEMPLATE_PATH, confidence=0.7, grayscale=True)
-                if found is not None:
-                    log(f"[CALL] 🖥 Cronómetro detectado en pantalla -> CONTESTADA")
-                    answered.set()
-                    return
-            except Exception as e:
-                log(f"[CALL] Error detección visual: {e}")
-            time.sleep(0.5)
+        try:
+            import mss
+            import cv2
+            import numpy as np as np_cv
+        except ImportError as e:
+            log(f"[CALL] ⚠ Detección visual desactivada: {e}. Instala: pip install mss opencv-python")
+            return
+
+        template = cv2.imread(TEMPLATE_PATH, cv2.IMREAD_GRAYSCALE)
+        if template is None:
+            log(f"[CALL] ⚠ No se pudo leer {TEMPLATE_PATH}")
+            return
+        th, tw = template.shape
+
+        log("[CALL] Detección visual activa (mss+opencv)...")
+        with mss.mss() as sct:
+            monitor = sct.monitors[1]
+            while not answered.is_set():
+                try:
+                    img = np_cv.array(sct.grab(monitor))
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+                    res = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(res)
+                    if max_val >= 0.7:
+                        log(f"[CALL] 🖥 Cronómetro detectado (conf={max_val:.2f}) -> CONTESTADA")
+                        answered.set()
+                        return
+                except Exception as e:
+                    log(f"[CALL] Error detección visual: {e}")
+                time.sleep(0.5)
 
     screen_thread = threading.Thread(target=watch_screen, daemon=True)
     screen_thread.start()
