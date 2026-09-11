@@ -3,8 +3,9 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { withRetry } from './retry.js';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120000 });
 
 const SITE_CONTEXT = `
 Eres el redactor principal de "Secreto de Salud y Bienestar" (secretodesaludybienestar.com).
@@ -45,11 +46,14 @@ TAGS: [3-5 tags separados por coma]
 `;
 
 export async function writeArticle(topic) {
-  const response = await client.messages.create({
-    model:      'claude-opus-4-7',
-    max_tokens: 2000,
-    messages:   [{ role: 'user', content: ARTICLE_PROMPT(topic) }],
-  });
+  const response = await withRetry(
+    () => client.messages.create({
+      model:      'claude-opus-4-7',
+      max_tokens: 2000,
+      messages:   [{ role: 'user', content: ARTICLE_PROMPT(topic) }],
+    }),
+    { retries: 3, baseDelayMs: 2000, label: 'Anthropic writeArticle' }
+  );
 
   const full    = response.content[0].text;
   const [html, metaRaw] = full.split('---META---');

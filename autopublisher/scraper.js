@@ -5,15 +5,16 @@
 
 import { readFileSync } from 'fs';
 import * as cheerio from 'cheerio';
+import { fetchWithRetry } from './retry.js';
 
 function log(msg) { console.log(`  [scraper] ${msg}`); }
 
 async function fetchPage(url) {
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HealthBot/1.0)' },
       signal: AbortSignal.timeout(10000),
-    });
+    }, { retries: 2, baseDelayMs: 800, label: `scraper ${url}` });
     if (!res.ok) return null;
     return await res.text();
   } catch { return null; }

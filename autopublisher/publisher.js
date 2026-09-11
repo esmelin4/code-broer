@@ -3,16 +3,17 @@
  */
 
 import { uploadImageToWP } from './images.js';
+import { fetchWithRetry, withRetry } from './retry.js';
 
 const BASE_URL = () => (process.env.WP_URL || '').replace(/\/$/, '');
 const AUTH     = () => Buffer.from(`${process.env.WP_USER}:${process.env.WP_PASS}`).toString('base64');
 
 async function wpPost(method, endpoint, body) {
-  const res = await fetch(`${BASE_URL()}/wp-json/wp/v2${endpoint}`, {
+  const res = await fetchWithRetry(`${BASE_URL()}/wp-json/wp/v2${endpoint}`, {
     method,
     headers: { 'Authorization': `Basic ${AUTH()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }, { retries: 3, baseDelayMs: 1500, label: `WP ${method} ${endpoint}` });
   const json = await res.json();
   if (!res.ok) throw new Error(`WP ${method} ${endpoint}: ${JSON.stringify(json).slice(0, 200)}`);
   return json;
@@ -79,7 +80,10 @@ export async function publishToWP(article, image) {
 
   if (featuredMediaId) postData.featured_media = featuredMediaId;
 
-  const post = await wpPost('POST', '/posts', postData);
+  const post = await withRetry(
+    () => wpPost('POST', '/posts', postData),
+    { retries: 2, baseDelayMs: 5000, label: 'WP crear post' }
+  );
   console.log(`  [publisher] ✓ Post publicado: ${post.link}`);
 
   return post.id;

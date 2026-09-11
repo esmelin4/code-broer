@@ -3,6 +3,8 @@
  * API gratuita: pexels.com/api (registrarse y obtener API key)
  */
 
+import { fetchWithRetry } from './retry.js';
+
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
 
 // Términos de búsqueda en inglés para mejores resultados en Pexels
@@ -45,10 +47,15 @@ export async function fetchImage(keyword) {
   const query = translateQuery(keyword);
 
   try {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=15&orientation=landscape`,
-      { headers: { Authorization: PEXELS_KEY } }
+      { headers: { Authorization: PEXELS_KEY } },
+      { retries: 3, baseDelayMs: 1000, label: 'Pexels search' }
     );
+    if (!res.ok) {
+      console.log(`  [images] Pexels respondió ${res.status}`);
+      return null;
+    }
     const data = await res.json();
     if (!data.photos?.length) return null;
 
@@ -76,13 +83,13 @@ export async function uploadImageToWP(image, title) {
 
   try {
     // Descargar la imagen
-    const imgRes  = await fetch(image.urlMedium);
+    const imgRes  = await fetchWithRetry(image.urlMedium, {}, { retries: 3, baseDelayMs: 1000, label: 'descarga imagen Pexels' });
     const buffer  = await imgRes.arrayBuffer();
     const ext     = 'jpg';
     const filename = `${title.slice(0, 40).replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`;
 
     // Subir a WordPress Media Library
-    const uploadRes = await fetch(`${BASE_URL}/wp-json/wp/v2/media`, {
+    const uploadRes = await fetchWithRetry(`${BASE_URL}/wp-json/wp/v2/media`, {
       method:  'POST',
       headers: {
         'Authorization':       `Basic ${AUTH}`,
@@ -90,7 +97,7 @@ export async function uploadImageToWP(image, title) {
         'Content-Type':        'image/jpeg',
       },
       body: buffer,
-    });
+    }, { retries: 3, baseDelayMs: 1500, label: 'subida imagen a WP' });
 
     if (!uploadRes.ok) {
       const err = await uploadRes.text();
@@ -100,14 +107,14 @@ export async function uploadImageToWP(image, title) {
 
     const media = await uploadRes.json();
     // Agregar crédito al pie de la imagen
-    await fetch(`${BASE_URL}/wp-json/wp/v2/media/${media.id}`, {
+    await fetchWithRetry(`${BASE_URL}/wp-json/wp/v2/media/${media.id}`, {
       method:  'POST',
       headers: { 'Authorization': `Basic ${AUTH}`, 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         caption:    `Foto de <a href="${image.pexelsUrl}" target="_blank">${image.photographer}</a> en Pexels`,
         alt_text:   image.altText,
       }),
-    });
+    }, { retries: 2, baseDelayMs: 1000, label: 'WP media caption' });
 
     console.log(`  [images] ✓ Imagen subida (id ${media.id})`);
     return media.id;
