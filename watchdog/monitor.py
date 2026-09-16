@@ -2,7 +2,8 @@
 """
 watchdog/monitor.py
 Vigila el "heartbeat" de otro script (por ejemplo el bot que corre en el cmd
-de Windows) y avisa por WhatsApp si no se actualiza durante varias horas.
+de Windows) y avisa por correo (Gmail) si no se actualiza durante varias
+horas. También puede avisar por WhatsApp (CallMeBot) si lo configurás.
 
 Cómo funciona:
   1. El script que querés vigilar (el que imprime "Última ejecución") tiene
@@ -18,17 +19,30 @@ Cómo funciona:
 
   2. Este script revisa ese archivo cada CHECK_INTERVAL_MIN minutos. Si
      pasaron más de THRESHOLD_HOURS desde la última actualización, manda un
-     WhatsApp por CallMeBot. No vuelve a avisar por el mismo bloqueo hasta
-     que el archivo se actualice de nuevo (para no spamear).
+     correo de alerta. No vuelve a avisar por el mismo bloqueo hasta que el
+     archivo se actualice de nuevo.
 
 Configuración (variables de entorno o archivo watchdog/.env):
   HEARTBEAT_FILE        Ruta al archivo de heartbeat (default: last_run.txt)
   THRESHOLD_HOURS       Horas sin cambios para disparar la alerta (default: 5)
   CHECK_INTERVAL_MIN    Cada cuántos minutos revisa (default: 10)
-  CALLMEBOT_PHONE       Tu número con código de país, ej: +18095551234
-  CALLMEBOT_APIKEY      Apikey que te da CallMeBot
+  EMAIL_FROM            Tu cuenta de Gmail que envía el aviso
+  EMAIL_APP_PASSWORD    Contraseña de aplicación de esa cuenta (no tu contraseña normal)
+  EMAIL_TO              A qué correo(s) avisar (separados por coma; puede ser el mismo EMAIL_FROM)
+  CALLMEBOT_PHONE       (opcional) Tu número con código de país, ej: +18095551234
+  CALLMEBOT_APIKEY      (opcional) Apikey que te da CallMeBot
 
-Activar CallMeBot (una sola vez, gratis, sin registro):
+Activar el correo (1 vez, gratis, funciona siempre):
+  1. Entrá a https://myaccount.google.com/apppasswords con la cuenta de
+     Gmail que va a enviar el aviso (necesitás tener verificación en 2 pasos
+     activada; si no la tenés, activala primero en Seguridad).
+  2. Creá una "contraseña de aplicación" (elegí "Otra" y ponele un nombre
+     como "watchdog"). Te da un código de 16 letras: copialo tal cual, sin
+     espacios, en EMAIL_APP_PASSWORD.
+  3. Poné esa misma cuenta en EMAIL_FROM y a dónde querés que llegue el
+     aviso en EMAIL_TO (puede ser tu mismo correo, o el de otra persona).
+
+Activar CallMeBot (opcional, WhatsApp, a veces tarda o no responde):
   1. Agregá el contacto +34 644 51 91 87 a tu WhatsApp.
   2. Enviale el mensaje: "I allow callmebot to send me messages"
   3. Te responde con tu apikey. Ponela en CALLMEBOT_APIKEY.
@@ -41,10 +55,12 @@ Cómo correrlo en Windows:
 """
 
 import os
+import smtplib
 import time
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
+from email.mime.text import MIMEText
 
 try:
     from dotenv import load_dotenv
@@ -55,6 +71,9 @@ except ImportError:
 HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "last_run.txt")
 THRESHOLD_HOURS = float(os.getenv("THRESHOLD_HOURS", "5"))
 CHECK_INTERVAL_MIN = float(os.getenv("CHECK_INTERVAL_MIN", "10"))
+EMAIL_FROM = os.getenv("EMAIL_FROM", "")
+EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD", "")
+EMAIL_TO = os.getenv("EMAIL_TO", "")
 CALLMEBOT_PHONE = os.getenv("CALLMEBOT_PHONE", "")
 CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY", "")
 
@@ -75,9 +94,29 @@ def read_last_heartbeat():
         return None
 
 
+def send_email(subject, message):
+    if not EMAIL_FROM or not EMAIL_APP_PASSWORD or not EMAIL_TO:
+        log("⚠️  Falta EMAIL_FROM, EMAIL_APP_PASSWORD o EMAIL_TO: no se puede avisar por correo.")
+        return False
+    recipients = [addr.strip() for addr in EMAIL_TO.split(",") if addr.strip()]
+    mail = MIMEText(message, "plain", "utf-8")
+    mail["Subject"] = subject
+    mail["From"] = EMAIL_FROM
+    mail["To"] = ", ".join(recipients)
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
+            server.starttls()
+            server.login(EMAIL_FROM, EMAIL_APP_PASSWORD)
+            server.sendmail(EMAIL_FROM, recipients, mail.as_string())
+        log("✅ Alerta enviada por correo.")
+        return True
+    except Exception as err:
+        log(f"✗ No se pudo enviar el correo: {err}")
+        return False
+
+
 def send_whatsapp(message):
     if not CALLMEBOT_PHONE or not CALLMEBOT_APIKEY:
-        log("⚠️  Falta CALLMEBOT_PHONE o CALLMEBOT_APIKEY: no se puede avisar por WhatsApp.")
         return False
     url = (
         "https://api.callmebot.com/whatsapp.php?"
@@ -93,6 +132,12 @@ def send_whatsapp(message):
     except Exception as err:
         log(f"✗ No se pudo enviar el WhatsApp: {err}")
         return False
+
+
+def notify(subject, message):
+    sent_email = send_email(subject, message)
+    sent_whatsapp = send_whatsapp(message)
+    return sent_email or sent_whatsapp
 
 
 def main():
@@ -116,7 +161,7 @@ def main():
                         f"{last.strftime('%Y-%m-%d %H:%M:%S')} "
                         f"(hace más de {THRESHOLD_HOURS}h). Revisalo."
                     )
-                    if send_whatsapp(msg):
+                    if notify("🚨 Watchdog: script sin actividad", msg):
                         already_alerted_for = last
                 else:
                     log(f"Ya se avisó por este bloqueo (desde {last}). Esperando que se reanude.")
