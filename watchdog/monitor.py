@@ -159,7 +159,8 @@ def main():
                     msg = (
                         "🚨 Alerta: el script no se actualiza desde "
                         f"{last.strftime('%Y-%m-%d %H:%M:%S')} "
-                        f"(hace más de {THRESHOLD_HOURS}h). Revisalo."
+                        f"(hace más de {THRESHOLD_HOURS}h).\n"
+                        "Correo muy rápido y actualiza manual el VPS."
                     )
                     if notify("🚨 Watchdog: script sin actividad", msg):
                         already_alerted_for = last

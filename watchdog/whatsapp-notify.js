@@ -93,7 +93,8 @@ async function checkHeartbeat(client) {
       log(`🚨 Sin cambios desde ${last.toLocaleString('es-ES')} (hace ${elapsedHours.toFixed(1)}h). Enviando alerta...`);
       const msg =
         `🚨 Alerta: el script no se actualiza desde ${last.toLocaleString('es-ES')} ` +
-        `(hace más de ${THRESHOLD_HOURS}h). Revisalo.`;
+        `(hace más de ${THRESHOLD_HOURS}h).\n` +
+        `Correo muy rápido y actualiza manual el VPS.`;
       try {
         await client.sendMessage(`${WHATSAPP_TO}@c.us`, msg);
         log('✅ Alerta enviada por WhatsApp.');
