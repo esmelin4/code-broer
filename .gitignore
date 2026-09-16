@@ -1,1 +1,4 @@
 node_modules/
+watchdog/.env
+last_run.txt
+__pycache__/

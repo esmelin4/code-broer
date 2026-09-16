@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""
+watchdog/monitor.py
+Vigila el "heartbeat" de otro script (por ejemplo el bot que corre en el cmd
+de Windows) y avisa por WhatsApp si no se actualiza durante varias horas.
+
+Cómo funciona:
+  1. El script que querés vigilar (el que imprime "Última ejecución") tiene
+     que escribir la fecha/hora actual en un archivo de texto cada vez que
+     completa un ciclo. Agregale estas 3 líneas justo donde imprime ese
+     mensaje:
+
+         from datetime import datetime
+         with open("last_run.txt", "w", encoding="utf-8") as f:
+             f.write(datetime.now().isoformat())
+
+     (usá la misma ruta en HEARTBEAT_FILE de este script)
+
+  2. Este script revisa ese archivo cada CHECK_INTERVAL_MIN minutos. Si
+     pasaron más de THRESHOLD_HOURS desde la última actualización, manda un
+     WhatsApp por CallMeBot. No vuelve a avisar por el mismo bloqueo hasta
+     que el archivo se actualice de nuevo (para no spamear).
+
+Configuración (variables de entorno o archivo watchdog/.env):
+  HEARTBEAT_FILE        Ruta al archivo de heartbeat (default: last_run.txt)
+  THRESHOLD_HOURS       Horas sin cambios para disparar la alerta (default: 5)
+  CHECK_INTERVAL_MIN    Cada cuántos minutos revisa (default: 10)
+  CALLMEBOT_PHONE       Tu número con código de país, ej: +18095551234
+  CALLMEBOT_APIKEY      Apikey que te da CallMeBot
+
+Activar CallMeBot (una sola vez, gratis, sin registro):
+  1. Agregá el contacto +34 644 51 91 87 a tu WhatsApp.
+  2. Enviale el mensaje: "I allow callmebot to send me messages"
+  3. Te responde con tu apikey. Ponela en CALLMEBOT_APIKEY.
+
+Cómo correrlo en Windows:
+  pip install python-dotenv      (opcional, para leer watchdog\\.env)
+  python watchdog\\monitor.py
+
+  Dejalo corriendo en otra ventana de cmd, junto a la del script que vigila.
+"""
+
+import os
+import time
+import urllib.request
+import urllib.parse
+from datetime import datetime, timedelta
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
+
+HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "last_run.txt")
+THRESHOLD_HOURS = float(os.getenv("THRESHOLD_HOURS", "5"))
+CHECK_INTERVAL_MIN = float(os.getenv("CHECK_INTERVAL_MIN", "10"))
+CALLMEBOT_PHONE = os.getenv("CALLMEBOT_PHONE", "")
+CALLMEBOT_APIKEY = os.getenv("CALLMEBOT_APIKEY", "")
+
+
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"{ts}  WATCHDOG  {msg}", flush=True)
+
+
+def read_last_heartbeat():
+    if not os.path.exists(HEARTBEAT_FILE):
+        return None
+    try:
+        with open(HEARTBEAT_FILE, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        return datetime.fromisoformat(content)
+    except (ValueError, OSError):
+        return None
+
+
+def send_whatsapp(message):
+    if not CALLMEBOT_PHONE or not CALLMEBOT_APIKEY:
+        log("⚠️  Falta CALLMEBOT_PHONE o CALLMEBOT_APIKEY: no se puede avisar por WhatsApp.")
+        return False
+    url = (
+        "https://api.callmebot.com/whatsapp.php?"
+        f"phone={urllib.parse.quote(CALLMEBOT_PHONE)}"
+        f"&text={urllib.parse.quote(message)}"
+        f"&apikey={urllib.parse.quote(CALLMEBOT_APIKEY)}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            resp.read()
+        log("✅ Alerta enviada por WhatsApp.")
+        return True
+    except Exception as err:
+        log(f"✗ No se pudo enviar el WhatsApp: {err}")
+        return False
+
+
+def main():
+    log(f"🐶 Watchdog iniciado. Vigilando '{HEARTBEAT_FILE}' cada {CHECK_INTERVAL_MIN} min.")
+    log(f"Umbral de alerta: {THRESHOLD_HOURS} horas sin cambios.")
+
+    already_alerted_for = None  # timestamp del heartbeat por el que ya se avisó
+
+    while True:
+        last = read_last_heartbeat()
+
+        if last is None:
+            log(f"⚠️  Todavía no se pudo leer '{HEARTBEAT_FILE}'.")
+        else:
+            elapsed = datetime.now() - last
+            if elapsed > timedelta(hours=THRESHOLD_HOURS):
+                if already_alerted_for != last:
+                    log(f"🚨 Sin cambios desde {last} (hace {elapsed}). Enviando alerta...")
+                    msg = (
+                        "🚨 Alerta: el script no se actualiza desde "
+                        f"{last.strftime('%Y-%m-%d %H:%M:%S')} "
+                        f"(hace más de {THRESHOLD_HOURS}h). Revisalo."
+                    )
+                    if send_whatsapp(msg):
+                        already_alerted_for = last
+                else:
+                    log(f"Ya se avisó por este bloqueo (desde {last}). Esperando que se reanude.")
+            else:
+                log(f"OK, última actualización hace {elapsed}.")
+                already_alerted_for = None
+
+        time.sleep(CHECK_INTERVAL_MIN * 60)
+
+
+if __name__ == "__main__":
+    main()
