@@ -2,3 +2,5 @@ node_modules/
 watchdog/.env
 last_run.txt
 __pycache__/
+watchdog/.wwebjs_auth/
+watchdog/.wwebjs_cache/
